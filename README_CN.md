@@ -41,82 +41,11 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 
 ## 📚 使用方法
 
-### 🔧 MCP 配置示例
+下面的章节按从简单到复杂的顺序排列，最简单的入门方式就是用账号密码连接服务器。直接复制对应场景下的 `mcp.json` 配置到你的 MCP 客户端即可使用。
 
-> **⚠️ 重要提示**: 在 MCP 配置文件中，每个命令行参数和其值必须是 `args` 数组中的独立元素。不要用空格将它们连接在一起。例如，使用 `"--host", "192.168.1.1"` 而不是 `"--host 192.168.1.1"`。
+> **⚠️ 重要提示**：在 MCP 配置文件中，每个命令行参数和其值必须是 `args` 数组中的独立元素。不要用空格将它们连接在一起。例如，使用 `"--host", "192.168.1.1"` 而不是 `"--host 192.168.1.1"`。
 
-#### ⚙️ 命令行选项
-
-```text
-选项:
-  --config-file       JSON 配置文件路径（推荐用于多服务器配置）
-  --ssh-config-file   SSH 配置文件路径（默认: ~/.ssh/config）
-  --ssh               SSH 连接配置（可以是 JSON 字符串或旧格式）
-  -h, --host          SSH 服务器主机地址或 SSH 配置中的别名
-  -p, --port          SSH 服务器端口
-  -u, --username      SSH 用户名
-  -w, --password      SSH 密码
-  -k, --privateKey    SSH 私钥文件路径
-  -P, --passphrase    私钥密码（如果有的话）
-  -a, --agent         SSH agent socket 路径
-  -W, --whitelist     命令白名单，以逗号分隔的正则表达式
-  -B, --blacklist     命令黑名单,以逗号分隔的正则表达式
-  -s, --socksProxy    SOCKS 代理地址 (e.g., socks://user:password@host:port)
-  --allowed-local-paths upload/download 允许访问的额外本地路径，逗号分隔
-  --allowed-remote-paths SFTP upload/download 允许访问的远端路径（POSIX 绝对路径），逗号分隔
-  --transport-mode    SSH transport 模式: exec 或 shell（默认: exec）
-  --shell-ready-timeout shell 就绪探测超时，单位毫秒（默认: 10000）
-  --pty               为命令执行分配伪终端 (默认: true)
-  --pre-connect       启动时预连接所有配置的 SSH 服务器
-```
-
-#### 🚇 `transportMode` 什么时候用
-
-`transportMode` 默认是 `exec`。
-
-- `exec` 适用于普通 Linux 服务器，远端支持标准 SSH `exec` 执行命令时优先使用这个模式。
-- `shell` 适用于必须先进入交互式 shell 的场景，比如堡垒机、跳板机、网络设备，或者远端 `exec` 能连上但执行命令不稳定或不可用的环境。
-
-两者差异：
-
-- `exec`：支持 `execute-command`、`upload`、`download`
-- `shell`：命令通过持久 shell 会话串行执行，内部带命令队列；但不支持 `upload` 和 `download`，因为该模式下禁用了 SFTP
-
-出现下面这些情况时，应该考虑切到 `shell`：
-
-- SSH 登录成功，但 `exec` 执行命令失败
-- 远端必须等登录 banner、profile、环境初始化完成后才能正常执行命令
-- 连接目标本质上是堡垒机或只暴露交互式 shell 的设备
-
-怎么配置：
-
-- 单连接命令行参数：`--transport-mode shell --shell-ready-timeout 15000`
-- JSON 配置文件：设置 `transportMode` 为 `"shell"`，可选再配 `shellReadyTimeoutMs`
-- `shell` 模式命令超时只支持配置文件字段：`shellCommandTimeoutMs`
-
-示例：
-
-```json
-{
-  "mcpServers": {
-    "ssh-mcp-server": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@fangjunjie/ssh-mcp-server",
-        "--host", "bastion.example.com",
-        "--port", "22",
-        "--username", "ops",
-        "--password", "pwd123456",
-        "--transport-mode", "shell",
-        "--shell-ready-timeout", "15000"
-      ]
-    }
-  }
-}
-```
-
-#### 🔑 使用密码
+### 1. 🔑 账号密码（最简单）
 
 ```json
 {
@@ -136,7 +65,7 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 }
 ```
 
-#### 🔐 使用私钥
+### 2. 🔐 账号 + 私钥
 
 ```json
 {
@@ -156,7 +85,7 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 }
 ```
 
-#### 🔏 使用带密码私钥
+### 3. 🔏 带密码的私钥
 
 ```json
 {
@@ -177,9 +106,9 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 }
 ```
 
-#### 📋 使用 ~/.ssh/config
+### 4. 📋 复用 `~/.ssh/config`
 
-你可以使用 `~/.ssh/config` 文件中定义的主机别名。服务器会自动从 SSH 配置中读取连接参数：
+如果你已经在 `~/.ssh/config` 配置了主机别名，服务器会自动从中读取连接参数，`mcp.json` 里就不用再写一遍。
 
 ```json
 {
@@ -226,7 +155,9 @@ Host myserver
 
 **注意**：命令行参数优先级高于 SSH 配置值。例如，如果你指定了 `--port 2222`，它会覆盖 SSH 配置中的端口。
 
-#### 🌐 使用 SOCKS 代理
+### 5. 🌐 通过 SOCKS 代理连接
+
+当目标主机只能通过 SOCKS 代理访问时：
 
 ```json
 {
@@ -247,11 +178,11 @@ Host myserver
 }
 ```
 
-#### 📝 使用命令白名单和黑名单
+### 6. 📝 使用命令白名单 / 黑名单
 
-使用 `--whitelist` 和 `--blacklist` 参数可以限制可执行的命令范围，多个模式之间用逗号分隔。每个模式都是一个正则表达式，用于匹配命令。
+通过 `--whitelist` 和 `--blacklist` 限制服务器允许执行的命令范围。多个模式之间用逗号分隔，每个模式都是一个正则表达式。**生产环境强烈建议配置**。
 
-示例：使用命令白名单
+白名单示例（仅允许只读型查看命令）：
 
 ```json
 {
@@ -272,7 +203,7 @@ Host myserver
 }
 ```
 
-示例：使用命令黑名单
+黑名单示例（屏蔽危险命令）：
 
 ```json
 {
@@ -293,11 +224,112 @@ Host myserver
 }
 ```
 
-> 注意：如果同时指定了白名单和黑名单，系统会先检查命令是否在白名单中，然后再检查是否在黑名单中。命令必须同时通过两项检查才能被执行。
+> 注意：如果同时指定了白名单和黑名单，系统会先检查命令是否在白名单中，再检查是否在黑名单中，命令必须同时通过两项检查才能被执行。
 
-### 🧩 多SSH连接用法示例
+### 7. 🧩 使用命令模板包裹命令
 
-有三种方式可以配置多个 SSH 连接：
+`commandTemplate` 会把每条执行的命令套进一个模板里，适合切换用户（`su`）、放进容器、或经过跳板机的场景。使用 `<command>` 作为占位符；模板会**在目录 `cd` 拼接之后**应用，因此整个 `cd ... && <实际命令>` 都会被包裹起来。
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "10.0.0.1",
+        "--port", "22",
+        "--username", "deploy",
+        "--password", "xxx",
+        "--command-template", "su root -c '<command>'"
+      ]
+    }
+  }
+}
+```
+
+当指定目录为 `/data` 执行 `ls /app` 时，实际发送的命令是：
+
+```
+su root -c 'cd -- "/data" && ls /app'
+```
+
+其他常见模板：
+
+```text
+sudo bash -c '<command>'
+docker exec -i mycontainer sh -c '<command>'
+ssh jumphost '<command>'
+```
+
+### 8. 🚇 堡垒机 / 跳板机（`transportMode: shell`）
+
+`transportMode` 默认是 `exec`。出现下面这些情况时，应该切换到 `shell`：
+
+- SSH 登录成功，但 `exec` 执行命令失败
+- 远端必须等登录 banner、profile、环境初始化完成后才能正常执行命令
+- 连接目标本质上是堡垒机或只暴露交互式 shell 的设备
+
+两者差异：
+
+- `exec`：支持 `execute-command`、`upload`、`download`
+- `shell`：命令通过持久 shell 会话串行执行，内部带命令队列；但**不支持** `upload` / `download`，因为该模式下禁用了 SFTP
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "bastion.example.com",
+        "--port", "22",
+        "--username", "ops",
+        "--password", "pwd123456",
+        "--transport-mode", "shell",
+        "--shell-ready-timeout", "15000"
+      ]
+    }
+  }
+}
+```
+
+JSON 配置文件中还可以通过 `shellCommandTimeoutMs` 覆盖 shell 模式下单条命令的默认超时。
+
+### 9. 🔐 多因素认证（2FA / MFA）
+
+当 SSH 服务器要求多因素认证（密码 + 私钥 + 2FA 验证码）时启用 `tryKeyboard`。密码和私钥会自动提供，但 2FA 验证码目前需要在提示出现时手动输入。
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "example.com",
+        "--port", "22",
+        "--username", "user",
+        "--password", "your_password",
+        "--privateKey", "/path/to/key",
+        "--try-keyboard"
+      ]
+    }
+  }
+}
+```
+
+**认证流程：**
+1. 私钥认证（如果提供）
+2. 密码认证（如果提供）
+3. 键盘交互式认证用于 2FA 验证码（目前需要手动输入）
+
+### 10. 🧩 多 SSH 连接配置
+
+需要在同一个 MCP server 里同时管理多个 SSH 目标时，给每个连接命名，调用时通过 `connectionName` 选择。共有三种配置方式：
 
 #### 📄 方式一：使用配置文件（推荐）
 
@@ -332,6 +364,15 @@ Host myserver
     "username": "bob",
     "password": "yyy",
     "socksProxy": "socks://127.0.0.1:10808"
+  },
+  {
+    "name": "secure-server",
+    "host": "secure.example.com",
+    "port": 22,
+    "username": "admin",
+    "password": "your_password",
+    "privateKey": "/path/to/private/key",
+    "tryKeyboard": true
   }
 ]
 ```
@@ -473,6 +514,33 @@ npx @fangjunjie/ssh-mcp-server \
   { "name": "dev", "host": "1.2.3.4", "port": 22, "username": "alice" },
   { "name": "prod", "host": "5.6.7.8", "port": 22, "username": "bob" }
 ]
+```
+
+### ⚙️ 命令行选项参考
+
+```text
+选项:
+  --config-file       JSON 配置文件路径（推荐用于多服务器配置）
+  --ssh-config-file   SSH 配置文件路径（默认: ~/.ssh/config）
+  --ssh               SSH 连接配置（可以是 JSON 字符串或旧格式）
+  -h, --host          SSH 服务器主机地址或 SSH 配置中的别名
+  -p, --port          SSH 服务器端口
+  -u, --username      SSH 用户名
+  -w, --password      SSH 密码
+  -k, --privateKey    SSH 私钥文件路径
+  -P, --passphrase    私钥密码（如果有的话）
+  -a, --agent         SSH agent socket 路径
+  --try-keyboard      启用键盘交互式认证以支持 2FA/MFA（默认: false）
+  -W, --whitelist     命令白名单，以逗号分隔的正则表达式
+  -B, --blacklist     命令黑名单，以逗号分隔的正则表达式
+  -s, --socksProxy    SOCKS 代理地址（如 socks://user:password@host:port）
+  --allowed-local-paths   upload/download 允许访问的额外本地路径，逗号分隔
+  --allowed-remote-paths  SFTP upload/download 允许访问的远端路径（POSIX 绝对路径），逗号分隔
+  --transport-mode    SSH transport 模式: exec 或 shell（默认: exec）
+  --shell-ready-timeout   shell 就绪探测超时，单位毫秒（默认: 10000）
+  --command-template  命令模板，使用 <command> 作为占位符（如 "su root -c '<command>'"）
+  --pty               为命令执行分配伪终端（默认: true）
+  --pre-connect       启动时预连接所有配置的 SSH 服务器
 ```
 
 ## 🛡️ 安全注意事项

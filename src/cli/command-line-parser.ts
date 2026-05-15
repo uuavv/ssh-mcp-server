@@ -89,7 +89,9 @@ export class CommandLineParser {
         "allowed-remote-paths": { type: "string" },
         "transport-mode": { type: "string" },
         "shell-ready-timeout": { type: "string" },
+        "command-template": { type: "string" },
         pty: { type: "boolean" },
+        "try-keyboard": { type: "boolean" },
         "pre-connect": { type: "boolean" },
       },
       allowPositionals: true,
@@ -192,7 +194,9 @@ export class CommandLineParser {
       const blacklist = values.blacklist;
       const allowedLocalPaths = values["allowed-local-paths"];
       const allowedRemotePaths = values["allowed-remote-paths"];
+      const commandTemplate = values["command-template"];
       const pty = values.pty;
+      const tryKeyboard = values["try-keyboard"];
 
       // 实际连接地址：优先使用 SSH config 的 HostName
       const actualHost = sshConfigEntry?.hostName || host;
@@ -219,8 +223,10 @@ export class CommandLineParser {
         agent: values.agent,
         socksProxy: values.socksProxy,
         pty: pty !== undefined ? pty : undefined,
+        tryKeyboard: tryKeyboard !== undefined ? tryKeyboard : undefined,
         transportMode: values["transport-mode"],
         shellReadyTimeoutMs: values["shell-ready-timeout"],
+        commandTemplate,
         commandWhitelist: whitelist
           ? whitelist
               .split(",")
@@ -289,14 +295,14 @@ export class CommandLineParser {
    * @private
    */
   private static normalizeConfig(config: any): SSHConfig {
-    const port = typeof config.port === "number" 
-      ? config.port 
+    const port = typeof config.port === "number"
+      ? config.port
       : parseInt(config.port, 10);
-    
+
     if (isNaN(port)) {
       throw new Error(`Port must be a valid number, got: ${config.port}`);
     }
-    
+
     return {
       name: config.name,
       host: config.host,
@@ -308,6 +314,7 @@ export class CommandLineParser {
       agent: config.agent,
       socksProxy: config.socksProxy,
       pty: this.parseBoolean(config.pty),
+      tryKeyboard: this.parseBoolean(config.tryKeyboard),
       transportMode:
         this.parseTransportMode(config.transportMode) ||
         this.DEFAULT_TRANSPORT_MODE,
@@ -356,7 +363,25 @@ export class CommandLineParser {
               )
               .filter(Boolean)
           : undefined,
+      commandTemplate: this.parseCommandTemplate(config.commandTemplate),
     };
+  }
+
+  private static parseCommandTemplate(
+    value: unknown,
+  ): string | undefined {
+    if (value === undefined || value === null || value === "") {
+      return undefined;
+    }
+
+    const template = String(value);
+    if (!template.includes("<command>")) {
+      throw new Error(
+        `commandTemplate must contain '<command>' placeholder, got: ${template}`,
+      );
+    }
+
+    return template;
   }
 
   private static normalizeRemotePath(remotePath: string): string {

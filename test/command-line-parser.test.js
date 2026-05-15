@@ -326,6 +326,44 @@ Host testhost
       process.argv = ['node', 'test', '--host', '1.2.3.4', '--port', '22', '--username', 'user', '--password', 'pass', '--allowed-remote-paths', 'var/log'];
       assert.throws(() => CommandLineParser.parseArgs(), /absolute POSIX/);
     });
+
+    it('应该正确解析配置文件中的 commandTemplate', () => {
+      const templateConfigPath = path.join(__dirname, 'fixtures', 'template-config.json');
+      fs.writeFileSync(templateConfigPath, JSON.stringify({
+        dev: {
+          host: '192.168.1.100',
+          port: 22,
+          username: 'devuser',
+          password: 'devpass',
+          commandTemplate: "su root -c '<command>'"
+        }
+      }));
+
+      process.argv = ['node', 'test', '--config-file', templateConfigPath];
+      const result = CommandLineParser.parseArgs();
+
+      assert.strictEqual(result.configs.dev.commandTemplate, "su root -c '<command>'");
+
+      fs.unlinkSync(templateConfigPath);
+    });
+
+    it('commandTemplate 缺少 <command> 占位符时应抛出错误', () => {
+      const badConfigPath = path.join(__dirname, 'fixtures', 'bad-template-config.json');
+      fs.writeFileSync(badConfigPath, JSON.stringify({
+        dev: {
+          host: '192.168.1.100',
+          port: 22,
+          username: 'devuser',
+          password: 'devpass',
+          commandTemplate: "su root -c 'missing placeholder'"
+        }
+      }));
+
+      process.argv = ['node', 'test', '--config-file', badConfigPath];
+      assert.throws(() => CommandLineParser.parseArgs(), /<command>/);
+
+      fs.unlinkSync(badConfigPath);
+    });
   });
 
   describe('优先级测试', () => {

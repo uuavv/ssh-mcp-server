@@ -677,5 +677,63 @@ describe('SSH Connection Manager', () => {
       assert.strictEqual(client.shellCalls.length, 0);
       assert.strictEqual(client.execCalls.length, 1);
     });
+
+    it('exec 模式应用 commandTemplate 包裹命令', async () => {
+      const stream = new FakeExecStream();
+      const client = new FakeClient({
+        onConnect: () => setImmediate(() => client.emit('ready')),
+        onExec: ({ command, options, callback }) => {
+          assert.strictEqual(command, "su root -c 'cd -- \"/app\" && ls'");
+          callback(undefined, stream);
+          setImmediate(() => {
+            stream.emit('data', Buffer.from('file.txt\n'));
+            stream.emit('exit', 0);
+            stream.emit('close', 0);
+          });
+        },
+      });
+
+      manager.createClient = () => client;
+      manager.scheduleStatusCollection = () => {};
+      manager.setConfig({
+        tmpl: createPasswordConfig({
+          name: 'tmpl',
+          transportMode: 'exec',
+          commandTemplate: "su root -c '<command>'",
+        }),
+      });
+
+      const result = await manager.executeCommand('ls', '/app', 'tmpl');
+      assert.strictEqual(result, 'file.txt');
+    });
+
+    it('exec 模式无 directory 时 commandTemplate 仅包裹原始命令', async () => {
+      const stream = new FakeExecStream();
+      const client = new FakeClient({
+        onConnect: () => setImmediate(() => client.emit('ready')),
+        onExec: ({ command, options, callback }) => {
+          assert.strictEqual(command, "su root -c 'whoami'");
+          callback(undefined, stream);
+          setImmediate(() => {
+            stream.emit('data', Buffer.from('root\n'));
+            stream.emit('exit', 0);
+            stream.emit('close', 0);
+          });
+        },
+      });
+
+      manager.createClient = () => client;
+      manager.scheduleStatusCollection = () => {};
+      manager.setConfig({
+        tmpl2: createPasswordConfig({
+          name: 'tmpl2',
+          transportMode: 'exec',
+          commandTemplate: "su root -c '<command>'",
+        }),
+      });
+
+      const result = await manager.executeCommand('whoami', undefined, 'tmpl2');
+      assert.strictEqual(result, 'root');
+    });
   });
 });

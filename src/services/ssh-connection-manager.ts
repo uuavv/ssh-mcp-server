@@ -614,13 +614,109 @@ export class SSHConnectionManager {
       }
     }
 
+    // Enable keyboard-interactive authentication for 2FA/MFA
+    if (config.tryKeyboard) {
+      sshConfig.tryKeyboard = true;
+      sshConfig.authHandler = (
+        methodsLeft: string[] | null,
+        partialSuccess: boolean | null,
+        callback: (nextAuth: string | string[]) => void,
+      ) => {
+        if (methodsLeft === null) {
+          // Initial authentication attempt
+          const authMethods: string[] = [];
+          if (config.privateKey) {
+            authMethods.push("publickey");
+          }
+          if (config.password) {
+            authMethods.push("password");
+          }
+          if (config.agent) {
+            authMethods.push("agent");
+          }
+          authMethods.push("keyboard-interactive");
+
+          Logger.log(
+            `[${key}] Initial authentication methods: ${authMethods.join(", ")}`,
+            "info",
+          );
+          return callback(authMethods);
+        }
+
+        // Handle subsequent authentication methods
+        Logger.log(
+          `[${key}] Server requires additional authentication. Methods left: ${methodsLeft?.join(", ") || "none"}`,
+          "info",
+        );
+
+        if (methodsLeft && methodsLeft.includes("keyboard-interactive")) {
+          return callback("keyboard-interactive");
+        }
+
+        if (methodsLeft && methodsLeft.includes("password") && config.password) {
+          return callback("password");
+        }
+
+        if (methodsLeft && methodsLeft.includes("publickey") && config.privateKey) {
+          return callback("publickey");
+        }
+
+        return callback(methodsLeft || []);
+      };
+
+      // Handle keyboard-interactive prompts (for 2FA codes)
+      sshConfig.keyboard = (
+        name: string,
+        instructions: string,
+        instructionsLang: string,
+        prompts: Array<{ prompt: string; echo: boolean }>,
+        finish: (responses: string[]) => void,
+      ) => {
+        Logger.log(
+          `[${key}] Keyboard-interactive authentication requested`,
+          "info",
+        );
+        Logger.log(`[${key}] Name: ${name}`, "debug");
+        Logger.log(`[${key}] Instructions: ${instructions}`, "debug");
+        Logger.log(`[${key}] Prompts: ${JSON.stringify(prompts)}`, "debug");
+
+        const responses: string[] = [];
+        for (const prompt of prompts) {
+          // For password prompts, use the configured password
+          if (
+            config.password &&
+            (prompt.prompt.toLowerCase().includes("password") ||
+              prompt.prompt.toLowerCase().includes("密码"))
+          ) {
+            responses.push(config.password);
+            Logger.log(
+              `[${key}] Responding to password prompt: ${prompt.prompt}`,
+              "debug",
+            );
+          } else {
+            // For 2FA/verification code prompts, return empty string
+            // The connection will fail and user needs to provide the code
+            responses.push("");
+            Logger.log(
+              `[${key}] Empty response for prompt (2FA code required): ${prompt.prompt}`,
+              "info",
+            );
+          }
+        }
+
+        finish(responses);
+      };
+    }
+
     if (config.agent) {
       sshConfig.agent = config.agent;
       Logger.log(
         `Using SSH agent authentication for [${key}]: ${config.agent}`,
         "info",
       );
-      return sshConfig;
+      if (!config.tryKeyboard) {
+        return sshConfig;
+      }
     }
 
     if (config.privateKey) {
@@ -633,7 +729,9 @@ export class SSHConnectionManager {
           `Using SSH private key authentication for [${key}]`,
           "info",
         );
-        return sshConfig;
+        if (!config.tryKeyboard) {
+          return sshConfig;
+        }
       } catch (error) {
         throw new ToolError(
           "LOCAL_FILE_READ_FAILED",
@@ -648,14 +746,20 @@ export class SSHConnectionManager {
     if (config.password) {
       sshConfig.password = config.password;
       Logger.log(`Using password authentication for [${key}]`, "info");
-      return sshConfig;
+      if (!config.tryKeyboard) {
+        return sshConfig;
+      }
     }
 
-    throw new ToolError(
-      "SSH_AUTHENTICATION_MISSING",
-      `No valid authentication method provided for [${key}] (agent, password or private key)`,
-      false,
-    );
+    if (!config.agent && !config.privateKey && !config.password && !config.tryKeyboard) {
+      throw new ToolError(
+        "SSH_AUTHENTICATION_MISSING",
+        `No valid authentication method provided for [${key}] (agent, password, private key, or tryKeyboard)`,
+        false,
+      );
+    }
+
+    return sshConfig;
   }
 
   private scheduleStatusCollection(key: string): void {
@@ -815,9 +919,13 @@ export class SSHConnectionManager {
     directory: string | undefined,
     timeout: number,
   ): Promise<string> {
-    const commandToRun = directory
+    let commandToRun = directory
       ? `cd -- ${JSON.stringify(directory)} && ${cmdString}`
       : cmdString;
+
+    if (config.commandTemplate) {
+      commandToRun = config.commandTemplate.replace("<command>", commandToRun);
+    }
 
     return new Promise<string>((resolve, reject) => {
       let timeoutId: NodeJS.Timeout;
@@ -1166,7 +1274,8 @@ export class SSHConnectionManager {
     }
 
     const commandId = this.generateMarkerId("command");
-    const script = this.buildShellCommandScript(commandId, cmdString, directory);
+    const config = this.getConfig(key);
+    const script = this.buildShellCommandScript(commandId, cmdString, directory, config.commandTemplate);
 
     return new Promise<string>((resolve, reject) => {
       let settled = false;
@@ -1273,12 +1382,17 @@ export class SSHConnectionManager {
     commandId: string,
     cmdString: string,
     directory?: string,
+    commandTemplate?: string,
   ): string {
     const beginMarker = `__MCP_BEGIN__${commandId}__`;
     const endMarker = `__MCP_END__${commandId}__RC__`;
-    const commandBody = directory
+    let commandBody = directory
       ? `cd -- ${JSON.stringify(directory)} && { ${cmdString}; }`
       : `{ ${cmdString}; }`;
+
+    if (commandTemplate) {
+      commandBody = commandTemplate.replace("<command>", commandBody);
+    }
 
     return [
       `printf '${beginMarker}\\n'`,

@@ -10,6 +10,7 @@ export interface SSHConfig {
   privateKey?: string;
   passphrase?: string;
   agent?: string; // SSH agent for authentication (use 'pageant' for Windows Pageant)
+  tryKeyboard?: boolean; // Enable keyboard-interactive authentication for 2FA/MFA, default: false
   commandWhitelist?: string[]; // Command whitelist (array of regex strings)
   commandBlacklist?: string[]; // Command blacklist (array of regex strings)
   socksProxy?: string; // SOCKS proxy URL, e.g. 'socks://user:pass@host:port'
@@ -19,6 +20,7 @@ export interface SSHConfig {
   transportMode?: "exec" | "shell"; // SSH transport mode, default: exec
   shellReadyTimeoutMs?: number; // Shell readiness probe timeout, default: 10000ms
   shellCommandTimeoutMs?: number; // Shell command timeout override, default: 30000ms
+  commandTemplate?: string; // Command template, use <command> as placeholder, e.g. "su root -c '<command>'"
 }
 
 /**

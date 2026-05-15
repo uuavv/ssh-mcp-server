@@ -47,83 +47,11 @@ NPM: [https://www.npmjs.com/package/@fangjunjie/ssh-mcp-server](https://www.npmj
 
 ## 📚 Usage
 
-### 🔧 MCP Configuration Examples
+The sections below are arranged from the simplest entry point (username + password) to more advanced scenarios. Pick the case that matches yours and copy the `mcp.json` snippet directly into your MCP client configuration.
 
 > **⚠️ Important**: In MCP configuration files, each command line argument and its value must be separate elements in the `args` array. Do NOT combine them with spaces. For example, use `"--host", "192.168.1.1"` instead of `"--host 192.168.1.1"`.
 
-#### ⚙️ Command Line Options
-
-```text
-Options:
-  --config-file       JSON configuration file path (recommended for multiple servers)
-  --ssh-config-file   SSH config file path (default: ~/.ssh/config)
-  --ssh               SSH connection configuration (can be JSON string or legacy format)
-  -h, --host          SSH server host address or alias from SSH config
-  -p, --port          SSH server port
-  -u, --username      SSH username
-  -w, --password      SSH password
-  -k, --privateKey    SSH private key file path
-  -P, --passphrase    Private key passphrase (if any)
-  -a, --agent         SSH agent socket path
-  -W, --whitelist     Command whitelist, comma-separated regular expressions
-  -B, --blacklist     Command blacklist, comma-separated regular expressions
-  -s, --socksProxy    SOCKS proxy server address (e.g., socks://user:password@host:port)
-  --allowed-local-paths Additional allowed local paths for upload/download, comma-separated
-  --allowed-remote-paths Allowed remote (POSIX, absolute) paths for SFTP upload/download, comma-separated
-  --transport-mode    SSH transport mode: exec or shell (default: exec)
-  --shell-ready-timeout Shell readiness probe timeout in milliseconds (default: 10000)
-  --pty               Allocate pseudo-tty for command execution (default: true)
-  --pre-connect       Pre-connect to all configured SSH servers on startup
-
-```
-
-#### 🚇 When To Use `transportMode`
-
-`transportMode` defaults to `exec`.
-
-- Use `exec` for regular Linux hosts that support standard SSH command execution.
-- Use `shell` for bastion hosts, jump hosts, network devices, or environments where you must enter an interactive shell before commands work reliably.
-
-Behavior differences:
-
-- `exec`: supports `execute-command`, `upload`, and `download`
-- `shell`: runs commands through a persistent shell session with an internal command queue, but does not support `upload` or `download` because SFTP is unavailable in this mode
-
-Switch to `shell` when:
-
-- SSH login succeeds but `exec` command execution fails
-- The remote side requires shell startup scripts, banners, or environment initialization first
-- The target effectively exposes only an interactive shell
-
-Configuration:
-
-- CLI: `--transport-mode shell --shell-ready-timeout 15000`
-- JSON config: set `transportMode` to `"shell"` and optionally set `shellReadyTimeoutMs`
-- JSON config only: use `shellCommandTimeoutMs` to override the default timeout for shell-backed commands
-
-Example:
-
-```json
-{
-  "mcpServers": {
-    "ssh-mcp-server": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@fangjunjie/ssh-mcp-server",
-        "--host", "bastion.example.com",
-        "--port", "22",
-        "--username", "ops",
-        "--password", "pwd123456",
-        "--transport-mode", "shell",
-        "--shell-ready-timeout", "15000"
-      ]
-    }
-  }
-}
-```
-
-#### 🔑 Using Password
+### 1. 🔑 Username + Password (simplest)
 
 ```json
 {
@@ -143,7 +71,7 @@ Example:
 }
 ```
 
-#### 🔐 Using Private Key
+### 2. 🔐 Username + Private Key
 
 ```json
 {
@@ -163,7 +91,7 @@ Example:
 }
 ```
 
-#### 🔏 Using Private Key with Passphrase
+### 3. 🔏 Private Key with Passphrase
 
 ```json
 {
@@ -184,9 +112,9 @@ Example:
 }
 ```
 
-#### 📋 Using ~/.ssh/config
+### 4. 📋 Reuse `~/.ssh/config`
 
-You can use host aliases defined in your `~/.ssh/config` file. The server will automatically read connection parameters from the SSH config:
+If you already have a host alias in `~/.ssh/config`, the server reads connection parameters directly from it — no need to repeat them in `mcp.json`.
 
 ```json
 {
@@ -233,7 +161,9 @@ You can also specify a custom SSH config file path:
 
 **Note**: Command-line parameters take precedence over SSH config values. For example, if you specify `--port 2222`, it will override the port from SSH config.
 
-#### 🌐 Using SOCKS Proxy
+### 5. 🌐 Connecting Through a SOCKS Proxy
+
+When the target host is only reachable through a SOCKS proxy:
 
 ```json
 {
@@ -252,14 +182,13 @@ You can also specify a custom SSH config file path:
     }
   }
 }
-
 ```
 
-#### 📝 Using Command Whitelist and Blacklist
+### 6. 📝 Restricting Commands With Whitelist / Blacklist
 
-Use the `--whitelist` and `--blacklist` parameters to restrict the range of executable commands. Multiple patterns are separated by commas. Each pattern is a regular expression used to match commands.
+Use `--whitelist` and `--blacklist` to limit which commands the server is allowed to run. Patterns are comma-separated regular expressions. **Strongly recommended** for any production use.
 
-Example: Using Command Whitelist
+Whitelist example (only allow read-only inspection commands):
 
 ```json
 {
@@ -280,7 +209,7 @@ Example: Using Command Whitelist
 }
 ```
 
-Example: Using Command Blacklist
+Blacklist example (block destructive commands):
 
 ```json
 {
@@ -301,11 +230,112 @@ Example: Using Command Blacklist
 }
 ```
 
-> Note: If both whitelist and blacklist are specified, the system will first check whether the command is in the whitelist, and then check whether it is in the blacklist. The command must pass both checks to be executed.
+> Note: If both whitelist and blacklist are specified, the command must pass both checks (whitelist first, then blacklist) to be executed.
 
-### 🧩 Multi-SSH Connection Example
+### 7. 🧩 Wrapping Commands With a Template
 
-There are three ways to configure multiple SSH connections:
+`commandTemplate` wraps every executed command in a template — useful for switching user via `su`, running inside a container, or jumping through another host. Use `<command>` as the placeholder; the template is applied **after** the working-directory `cd` is prepended, so the entire `cd ... && <command>` chain gets wrapped.
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "10.0.0.1",
+        "--port", "22",
+        "--username", "deploy",
+        "--password", "xxx",
+        "--command-template", "su root -c '<command>'"
+      ]
+    }
+  }
+}
+```
+
+Executing `ls /app` with directory `/data` actually sends:
+
+```
+su root -c 'cd -- "/data" && ls /app'
+```
+
+Other useful templates:
+
+```text
+sudo bash -c '<command>'
+docker exec -i mycontainer sh -c '<command>'
+ssh jumphost '<command>'
+```
+
+### 8. 🚇 Bastion / Jump Host (`transportMode: shell`)
+
+`transportMode` defaults to `exec`. Switch to `shell` when:
+
+- SSH login succeeds but `exec` command execution fails
+- The remote side requires shell startup scripts, banners, or environment initialization first
+- The target effectively exposes only an interactive shell (bastion hosts, jump hosts, network devices)
+
+Behavior differences:
+
+- `exec`: supports `execute-command`, `upload`, and `download`
+- `shell`: runs commands through a persistent shell session with an internal command queue, but does **not** support `upload` / `download` because SFTP is unavailable in this mode
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "bastion.example.com",
+        "--port", "22",
+        "--username", "ops",
+        "--password", "pwd123456",
+        "--transport-mode", "shell",
+        "--shell-ready-timeout", "15000"
+      ]
+    }
+  }
+}
+```
+
+In JSON config files you can also set `shellCommandTimeoutMs` to override the default per-command timeout for shell-backed connections.
+
+### 9. 🔐 Multi-Factor Authentication (2FA / MFA)
+
+When the SSH server requires multi-factor authentication (password + private key + 2FA verification code), enable `tryKeyboard`. The password and private key are auto-supplied; the 2FA code currently has to be entered manually at the prompt.
+
+```json
+{
+  "mcpServers": {
+    "ssh-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fangjunjie/ssh-mcp-server",
+        "--host", "example.com",
+        "--port", "22",
+        "--username", "user",
+        "--password", "your_password",
+        "--privateKey", "/path/to/key",
+        "--try-keyboard"
+      ]
+    }
+  }
+}
+```
+
+**Authentication flow:**
+1. Private key authentication (if provided)
+2. Password authentication (if provided)
+3. Keyboard-interactive for 2FA code (currently requires manual input)
+
+### 10. 🧩 Managing Multiple SSH Connections
+
+When you need to expose more than one SSH target through the same MCP server, register them under unique connection names and select the target at call time via `connectionName`. There are three ways to configure them:
 
 #### 📄 Method 1: Using Config File (Recommended)
 
@@ -339,6 +369,15 @@ Create a JSON configuration file (e.g., `ssh-config.json`):
     "username": "bob",
     "password": "yyy",
     "socksProxy": "socks://127.0.0.1:10808"
+  },
+  {
+    "name": "secure-server",
+    "host": "secure.example.com",
+    "port": 22,
+    "username": "admin",
+    "password": "your_password",
+    "privateKey": "/path/to/private/key",
+    "tryKeyboard": true
   }
 ]
 ```
@@ -479,6 +518,33 @@ Example response:
   { "name": "dev", "host": "1.2.3.4", "port": 22, "username": "alice" },
   { "name": "prod", "host": "5.6.7.8", "port": 22, "username": "bob" }
 ]
+```
+
+### ⚙️ Command Line Options Reference
+
+```text
+Options:
+  --config-file       JSON configuration file path (recommended for multiple servers)
+  --ssh-config-file   SSH config file path (default: ~/.ssh/config)
+  --ssh               SSH connection configuration (can be JSON string or legacy format)
+  -h, --host          SSH server host address or alias from SSH config
+  -p, --port          SSH server port
+  -u, --username      SSH username
+  -w, --password      SSH password
+  -k, --privateKey    SSH private key file path
+  -P, --passphrase    Private key passphrase (if any)
+  -a, --agent         SSH agent socket path
+  --try-keyboard      Enable keyboard-interactive authentication for 2FA/MFA (default: false)
+  -W, --whitelist     Command whitelist, comma-separated regular expressions
+  -B, --blacklist     Command blacklist, comma-separated regular expressions
+  -s, --socksProxy    SOCKS proxy server address (e.g., socks://user:password@host:port)
+  --allowed-local-paths   Additional allowed local paths for upload/download, comma-separated
+  --allowed-remote-paths  Allowed remote (POSIX, absolute) paths for SFTP upload/download, comma-separated
+  --transport-mode    SSH transport mode: exec or shell (default: exec)
+  --shell-ready-timeout   Shell readiness probe timeout in milliseconds (default: 10000)
+  --command-template  Command template, use <command> as placeholder (e.g., "su root -c '<command>'")
+  --pty               Allocate pseudo-tty for command execution (default: true)
+  --pre-connect       Pre-connect to all configured SSH servers on startup
 ```
 
 ## 🛡️ Security Considerations
