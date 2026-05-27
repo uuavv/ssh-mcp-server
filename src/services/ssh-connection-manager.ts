@@ -29,6 +29,10 @@ const ANSI_CSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
 const COMMAND_TEMPLATE_PLACEHOLDER = "<command>";
 const QUOTED_COMMAND_TEMPLATE_PLACEHOLDER = "<quotedCommand>";
+const DEFAULT_CONNECTION_TIMEOUT_MS = 30000;
+const DEFAULT_KEEPALIVE_INTERVAL_MS = 10000;
+const DEFAULT_KEEPALIVE_COUNT_MAX = 3;
+const DEFAULT_SFTP_TIMEOUT_MS = 300000;
 
 function applyCommandTemplate(template: string, command: string): string {
   const quotedCommand = shellQuote(command);
@@ -195,12 +199,31 @@ export class SSHConnectionManager {
     const client = this.createClient();
     const connectionPromise = new Promise<void>(async (resolve, reject) => {
       let settled = false;
+      const timeoutMs = this.getConnectionTimeoutMs(config);
+      const timeoutId = setTimeout(() => {
+        rejectOnce(
+          new ToolError(
+            "SSH_CONNECTION_TIMEOUT",
+            `SSH connection [${key}] timed out after ${timeoutMs}ms`,
+            true,
+          ),
+        );
+        this.invalidateConnection(key);
+        try {
+          client.destroy();
+        } catch {
+          // Ignore cleanup errors during connection timeout.
+        }
+      }, timeoutMs);
+
+      const clearConnectionTimeout = () => clearTimeout(timeoutId);
 
       const resolveOnce = () => {
         if (settled) {
           return;
         }
         settled = true;
+        clearConnectionTimeout();
         resolve();
       };
 
@@ -209,6 +232,7 @@ export class SSHConnectionManager {
           return;
         }
         settled = true;
+        clearConnectionTimeout();
         reject(error);
       };
 
@@ -441,6 +465,7 @@ export class SSHConnectionManager {
     name?: string,
   ): Promise<string> {
     const config = this.getConfig(name);
+    const key = name || this.defaultName;
     if (this.getTransportMode(config) === "shell") {
       throw new ToolError(
         "UNSUPPORTED_IN_SHELL_MODE",
@@ -452,12 +477,23 @@ export class SSHConnectionManager {
     const validatedLocalPath = this.validateLocalPath(localPath, name, "read");
     const validatedRemotePath = this.validateRemotePath(remotePath, name);
     const client = await this.ensureConnected(name);
-    const sftp = await this.openSftp(client);
+    const sftpTimeoutMs = this.getSftpTimeoutMs(config);
+    const sftp = await this.withTimeout(
+      this.openSftp(client),
+      sftpTimeoutMs,
+      () => this.invalidateConnection(key),
+      `SFTP open timed out after ${sftpTimeoutMs}ms`,
+    );
 
     try {
-      await pipeline(
-        fs.createReadStream(validatedLocalPath),
-        sftp.createWriteStream(validatedRemotePath),
+      await this.withTimeout(
+        pipeline(
+          fs.createReadStream(validatedLocalPath),
+          sftp.createWriteStream(validatedRemotePath),
+        ),
+        sftpTimeoutMs,
+        () => this.invalidateConnection(key),
+        `SFTP upload timed out after ${sftpTimeoutMs}ms`,
       );
       return "File uploaded successfully";
     } catch (error) {
@@ -487,6 +523,7 @@ export class SSHConnectionManager {
     name?: string,
   ): Promise<string> {
     const config = this.getConfig(name);
+    const key = name || this.defaultName;
     if (this.getTransportMode(config) === "shell") {
       throw new ToolError(
         "UNSUPPORTED_IN_SHELL_MODE",
@@ -498,15 +535,26 @@ export class SSHConnectionManager {
     const validatedLocalPath = this.validateLocalPath(localPath, name, "write");
     const validatedRemotePath = this.validateRemotePath(remotePath, name);
     const client = await this.ensureConnected(name);
-    const sftp = await this.openSftp(client);
+    const sftpTimeoutMs = this.getSftpTimeoutMs(config);
+    const sftp = await this.withTimeout(
+      this.openSftp(client),
+      sftpTimeoutMs,
+      () => this.invalidateConnection(key),
+      `SFTP open timed out after ${sftpTimeoutMs}ms`,
+    );
     const tempLocalPath = `${validatedLocalPath}.tmp-${process.pid}-${Date.now()}-${Math.random()
       .toString(16)
       .slice(2)}`;
 
     try {
-      await pipeline(
-        sftp.createReadStream(validatedRemotePath),
-        fs.createWriteStream(tempLocalPath, { flags: "wx" }),
+      await this.withTimeout(
+        pipeline(
+          sftp.createReadStream(validatedRemotePath),
+          fs.createWriteStream(tempLocalPath, { flags: "wx" }),
+        ),
+        sftpTimeoutMs,
+        () => this.invalidateConnection(key),
+        `SFTP download timed out after ${sftpTimeoutMs}ms`,
       );
       await fs.promises.rename(tempLocalPath, validatedLocalPath);
       return "File downloaded successfully";
@@ -557,6 +605,36 @@ export class SSHConnectionManager {
     } catch {
       // Ignore cleanup errors after transfer completion.
     }
+  }
+
+  private withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    onTimeout: () => void,
+    message: string,
+  ): Promise<T> {
+    let timeoutId: NodeJS.Timeout;
+    return new Promise<T>((resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        try {
+          onTimeout();
+        } catch {
+          // Ignore cleanup errors while rejecting a timed out operation.
+        }
+        reject(new ToolError("OPERATION_TIMEOUT", message, true));
+      }, timeoutMs);
+
+      promise.then(
+        (value) => {
+          clearTimeout(timeoutId);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        },
+      );
+    });
   }
 
   private errorPathMatches(error: unknown, localPath: string): boolean {
@@ -678,6 +756,14 @@ export class SSHConnectionManager {
     return config.shellCommandTimeoutMs || 30000;
   }
 
+  private getConnectionTimeoutMs(config: SSHConfig): number {
+    return config.connectionTimeoutMs || DEFAULT_CONNECTION_TIMEOUT_MS;
+  }
+
+  private getSftpTimeoutMs(config: SSHConfig): number {
+    return config.sftpTimeoutMs || DEFAULT_SFTP_TIMEOUT_MS;
+  }
+
   private async buildClientConfig(
     key: string,
     config: SSHConfig,
@@ -686,6 +772,12 @@ export class SSHConnectionManager {
       host: config.host,
       port: config.port,
       username: config.username,
+      readyTimeout: this.getConnectionTimeoutMs(config),
+      timeout: this.getConnectionTimeoutMs(config),
+      keepaliveInterval:
+        config.keepaliveIntervalMs || DEFAULT_KEEPALIVE_INTERVAL_MS,
+      keepaliveCountMax:
+        config.keepaliveCountMax || DEFAULT_KEEPALIVE_COUNT_MAX,
     };
 
     if (config.socksProxy) {
@@ -1045,7 +1137,7 @@ export class SSHConnectionManager {
       );
     }
 
-    const client = await this.ensureConnected(name);
+    const key = name || this.defaultName;
     const config = this.getConfig(name);
     const transportMode = this.getTransportMode(config);
     const timeout =
@@ -1053,12 +1145,26 @@ export class SSHConnectionManager {
       (transportMode === "shell"
         ? this.getShellCommandTimeoutMs(config)
         : 30000);
+    const connectionTimeoutMs = this.getConnectionTimeoutMs(config);
+    const client = await this.withTimeout(
+      this.ensureConnected(name),
+      connectionTimeoutMs,
+      () => this.invalidateConnection(key),
+      `SSH connection [${key}] timed out after ${connectionTimeoutMs}ms`,
+    );
 
     if (transportMode === "shell") {
       return this.runShellCommand(cmdString, directory, name, timeout);
     }
 
-    return this.runExecCommand(client, config, cmdString, directory, timeout);
+    return this.runExecCommand(
+      client,
+      config,
+      cmdString,
+      directory,
+      timeout,
+      key,
+    );
   }
 
   private runExecCommand(
@@ -1067,6 +1173,7 @@ export class SSHConnectionManager {
     cmdString: string,
     directory: string | undefined,
     timeout: number,
+    key: string,
   ): Promise<string> {
     let commandToRun = directory
       ? `cd -- ${shellQuote(directory)} && ${cmdString}`
@@ -1077,12 +1184,16 @@ export class SSHConnectionManager {
     }
 
     return new Promise<string>((resolve, reject) => {
-      let timeoutId: NodeJS.Timeout;
+      let openTimeoutId: NodeJS.Timeout | undefined;
+      let commandTimeoutId: NodeJS.Timeout | undefined;
       let settled = false;
 
       const cleanup = () => {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
+        if (openTimeoutId) {
+          clearTimeout(openTimeoutId);
+        }
+        if (commandTimeoutId) {
+          clearTimeout(commandTimeoutId);
         }
       };
 
@@ -1090,8 +1201,23 @@ export class SSHConnectionManager {
         commandToRun,
         { pty: config.pty !== undefined ? config.pty : true },
         (err: Error | undefined, stream: ClientChannel) => {
+          if (openTimeoutId) {
+            clearTimeout(openTimeoutId);
+            openTimeoutId = undefined;
+          }
+
+          if (settled) {
+            try {
+              stream?.close();
+            } catch {
+              // Ignore late stream cleanup errors after timeout.
+            }
+            return;
+          }
+
           if (err) {
             cleanup();
+            settled = true;
             reject(
               new ToolError(
                 "COMMAND_EXECUTION_ERROR",
@@ -1179,7 +1305,7 @@ export class SSHConnectionManager {
             );
           });
 
-          timeoutId = setTimeout(() => {
+          commandTimeoutId = setTimeout(() => {
             try {
               stream.close();
             } catch {
@@ -1206,6 +1332,20 @@ export class SSHConnectionManager {
           }, timeout);
         },
       );
+
+      openTimeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this.invalidateConnection(key);
+          reject(
+            new ToolError(
+              "COMMAND_TIMEOUT",
+              `[timeout] Command channel did not open within ${timeout}ms`,
+              true,
+            ),
+          );
+        }
+      }, timeout);
     });
   }
 

@@ -374,7 +374,10 @@ Create a JSON configuration file (e.g., `ssh-config.json`):
     "password": "pwd123456",
     "transportMode": "shell",
     "shellReadyTimeoutMs": 15000,
-    "shellCommandTimeoutMs": 45000
+    "shellCommandTimeoutMs": 45000,
+    "connectionTimeoutMs": 30000,
+    "keepaliveIntervalMs": 10000,
+    "keepaliveCountMax": 3
   },
   {
     "name": "prod",
@@ -508,6 +511,8 @@ The `execute-command` tool supports timeout options to prevent commands from han
 
 - **timeout**: Command execution timeout in milliseconds (optional, default is 30000ms)
 - In `shell` mode, you can also set `shellCommandTimeoutMs` per connection in the JSON config file
+- Connections use SSH keepalives by default (`keepaliveIntervalMs`: 10000, `keepaliveCountMax`: 3) and respect `connectionTimeoutMs` for connection setup
+- SFTP open and transfer operations respect `sftpTimeoutMs` (default 300000ms)
 - Error responses include stable `code`, `message`, and `retriable` fields for easier agent-side handling
 
 This is particularly useful for commands like `ping`, `tail -f`, or other long-running processes that might block execution.
