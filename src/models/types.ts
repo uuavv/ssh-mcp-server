@@ -20,6 +20,10 @@ export interface SSHConfig {
   transportMode?: "exec" | "shell"; // SSH transport mode, default: exec
   shellReadyTimeoutMs?: number; // Shell readiness probe timeout, default: 10000ms
   shellCommandTimeoutMs?: number; // Shell command timeout override, default: 30000ms
+  connectionTimeoutMs?: number; // SSH connection and handshake timeout, default: 30000ms
+  sftpTimeoutMs?: number; // SFTP open and transfer timeout, default: 300000ms
+  keepaliveIntervalMs?: number; // SSH keepalive interval, default: 10000ms
+  keepaliveCountMax?: number; // Unanswered keepalive packets before disconnect, default: 3
   commandTemplate?: string; // Command template, use <quotedCommand> for shell arguments or <command> for raw insertion
 }
 

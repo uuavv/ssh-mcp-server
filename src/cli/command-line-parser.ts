@@ -330,6 +330,19 @@ export class CommandLineParser {
         config.shellCommandTimeoutMs,
         "shellCommandTimeoutMs",
       ),
+      connectionTimeoutMs: this.parseTimeout(
+        config.connectionTimeoutMs,
+        "connectionTimeoutMs",
+      ),
+      sftpTimeoutMs: this.parseTimeout(config.sftpTimeoutMs, "sftpTimeoutMs"),
+      keepaliveIntervalMs: this.parseTimeout(
+        config.keepaliveIntervalMs,
+        "keepaliveIntervalMs",
+      ),
+      keepaliveCountMax: this.parseTimeout(
+        config.keepaliveCountMax,
+        "keepaliveCountMax",
+      ),
       commandWhitelist: Array.isArray(config.commandWhitelist)
         ? config.commandWhitelist
         : config.whitelist

@@ -39,6 +39,12 @@ class FakeShellChannel extends EventEmitter {
   }
 }
 
+class FakeSftp extends EventEmitter {
+  end() {
+    this.emit('end');
+  }
+}
+
 class FakeClient extends EventEmitter {
   constructor(handlers = {}) {
     super();
@@ -72,6 +78,11 @@ class FakeClient extends EventEmitter {
   }
 
   end() {
+    this.endCalls += 1;
+    this.emit('close');
+  }
+
+  destroy() {
     this.endCalls += 1;
     this.emit('close');
   }
@@ -479,6 +490,35 @@ describe('SSH Connection Manager', () => {
         manager.connect = originalConnect;
       }
     });
+
+    it('连接配置默认启用超时和 keepalive', async () => {
+      const sshConfig = await manager.buildClientConfig(
+        'dev',
+        createPasswordConfig({ name: 'dev' }),
+      );
+
+      assert.strictEqual(sshConfig.readyTimeout, 30000);
+      assert.strictEqual(sshConfig.timeout, 30000);
+      assert.strictEqual(sshConfig.keepaliveInterval, 10000);
+      assert.strictEqual(sshConfig.keepaliveCountMax, 3);
+    });
+
+    it('连接配置允许覆盖超时和 keepalive', async () => {
+      const sshConfig = await manager.buildClientConfig(
+        'dev',
+        createPasswordConfig({
+          name: 'dev',
+          connectionTimeoutMs: 1234,
+          keepaliveIntervalMs: 5678,
+          keepaliveCountMax: 2,
+        }),
+      );
+
+      assert.strictEqual(sshConfig.readyTimeout, 1234);
+      assert.strictEqual(sshConfig.timeout, 1234);
+      assert.strictEqual(sshConfig.keepaliveInterval, 5678);
+      assert.strictEqual(sshConfig.keepaliveCountMax, 2);
+    });
   });
 
   describe('Shell transport', () => {
@@ -841,6 +881,74 @@ describe('SSH Connection Manager', () => {
       assert.strictEqual(result, '/tmp');
       assert.strictEqual(client.shellCalls.length, 0);
       assert.strictEqual(client.execCalls.length, 1);
+    });
+
+    it('exec channel 打不开时会按命令超时失效连接', async () => {
+      const client = new FakeClient({
+        onConnect: () => setImmediate(() => client.emit('ready')),
+        onExec: () => {
+          // Simulate a half-open SSH transport where openChannel never calls back.
+        },
+      });
+
+      manager.createClient = () => client;
+      manager.scheduleStatusCollection = () => {};
+      manager.setConfig({
+        exec: createPasswordConfig({
+          name: 'exec',
+          transportMode: 'exec',
+        }),
+      });
+
+      await assert.rejects(
+        () => manager.executeCommand('pwd', undefined, 'exec', { timeout: 20 }),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'COMMAND_TIMEOUT');
+          assert.match(error.message, /Command channel did not open/);
+          return true;
+        },
+      );
+
+      assert.strictEqual(manager.getAllServerInfos()[0].connected, false);
+      assert.strictEqual(client.endCalls, 1);
+    });
+
+    it('SFTP open 卡住时会按 sftpTimeoutMs 失效连接', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-mcp-test-'));
+      const localFile = path.join(tempDir, 'upload.txt');
+      fs.writeFileSync(localFile, 'data');
+
+      const client = new FakeClient({
+        onConnect: () => setImmediate(() => client.emit('ready')),
+        onSftp: () => {
+          // Simulate a half-open SSH transport where SFTP never calls back.
+        },
+      });
+
+      manager.createClient = () => client;
+      manager.scheduleStatusCollection = () => {};
+      manager.setConfig({
+        exec: createPasswordConfig({
+          name: 'exec',
+          transportMode: 'exec',
+          allowedLocalPaths: [tempDir],
+          sftpTimeoutMs: 20,
+        }),
+      });
+
+      await assert.rejects(
+        () => manager.upload(localFile, '/tmp/upload.txt', 'exec'),
+        (error) => {
+          assert.ok(error instanceof ToolError);
+          assert.strictEqual(error.code, 'OPERATION_TIMEOUT');
+          assert.match(error.message, /SFTP open timed out/);
+          return true;
+        },
+      );
+
+      assert.strictEqual(manager.getAllServerInfos()[0].connected, false);
+      assert.strictEqual(client.endCalls, 1);
     });
 
     it('exec 模式应用 commandTemplate 包裹命令', async () => {
