@@ -20,6 +20,8 @@ Welcome to join wechat group:
 
 ![wx_1.png](images/wx_1.png)
 
+> Scan the code with wechat and reply "Join group".
+
 ## ✨ Key Features
 
 - **🔒 Secure Connections**: Supports multiple secure SSH connection methods, including password authentication and private key authentication (with passphrase support)
