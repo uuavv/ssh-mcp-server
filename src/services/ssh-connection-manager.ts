@@ -853,55 +853,59 @@ export class SSHConnectionManager {
     // Enable keyboard-interactive authentication for 2FA/MFA
     if (config.tryKeyboard) {
       sshConfig.tryKeyboard = true;
+
+      // Build ordered preference of methods this connection supports.
+      const authMethods: string[] = [];
+      if (config.privateKey || config.agent) {
+        authMethods.push("publickey");
+      }
+      if (config.password) {
+        authMethods.push("password");
+      }
+      authMethods.push("keyboard-interactive");
+
+      const triedMethods: string[] = [];
+      const MAX_AUTH_ATTEMPTS = authMethods.length + 1;
+
       sshConfig.authHandler = (
         methodsLeft: string[] | null,
         partialSuccess: boolean | null,
         callback: (nextAuth: string | string[]) => void,
       ) => {
-        if (methodsLeft === null) {
-          // Initial authentication attempt — the SSH protocol only defines
-          // password / publickey / keyboard-interactive / hostbased.
-          // SSH agent works under the publickey method, so it does not get
-          // its own entry here.
-          const authMethods: string[] = [];
-          if (config.privateKey || config.agent) {
-            authMethods.push("publickey");
-          }
-          if (config.password) {
-            authMethods.push("password");
-          }
-          authMethods.push("keyboard-interactive");
-
+        // Prevent infinite retry loops.
+        if (triedMethods.length >= MAX_AUTH_ATTEMPTS) {
           Logger.log(
-            `[${key}] Initial authentication methods: ${authMethods.join(", ")}`,
-            "info",
+            `[${key}] Authentication failed after trying [${triedMethods.join(", ")}]`,
+            "error",
           );
-          return callback(authMethods);
+          return callback([]);
         }
 
-        // Handle subsequent authentication methods
-        Logger.log(
-          `[${key}] Server requires additional authentication. Methods left: ${methodsLeft?.join(", ") || "none"}`,
-          "info",
+        // Pick the next preferred method that hasn't been attempted yet
+        // (and is still allowed by the server if methodsLeft is provided).
+        const candidates =
+          methodsLeft !== null
+            ? authMethods.filter((m) => methodsLeft.includes(m))
+            : authMethods;
+
+        const nextMethod = candidates.find(
+          (m) => !triedMethods.includes(m),
         );
 
-        if (methodsLeft && methodsLeft.includes("keyboard-interactive")) {
-          return callback("keyboard-interactive");
+        if (!nextMethod) {
+          Logger.log(
+            `[${key}] All supported auth methods exhausted`,
+            "error",
+          );
+          return callback([]);
         }
 
-        if (methodsLeft && methodsLeft.includes("password") && config.password) {
-          return callback("password");
-        }
-
-        if (
-          methodsLeft &&
-          methodsLeft.includes("publickey") &&
-          (config.privateKey || config.agent)
-        ) {
-          return callback("publickey");
-        }
-
-        return callback(methodsLeft || []);
+        triedMethods.push(nextMethod);
+        Logger.log(
+          `[${key}] Trying auth method: ${nextMethod} (${triedMethods.length}/${MAX_AUTH_ATTEMPTS})`,
+          "info",
+        );
+        return callback(nextMethod);
       };
 
       // Handle keyboard-interactive prompts (for 2FA codes)
@@ -932,6 +936,14 @@ export class SSHConnectionManager {
             responses.push(config.password);
             Logger.log(
               `[${key}] Responding to password prompt: ${prompt.prompt}`,
+              "debug",
+            );
+          } else if (config.password && prompts.length === 1 && !prompt.echo) {
+            // Single non-echoing prompt without "password" label:
+            // treat as password prompt (common on embedded devices)
+            responses.push(config.password);
+            Logger.log(
+              `[${key}] Responding to single non-echo prompt (assumed password): ${prompt.prompt}`,
               "debug",
             );
           } else if (otpCode) {
