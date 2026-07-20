@@ -235,9 +235,11 @@ describe('集成测试', () => {
 
     it('应该正确处理缺少认证参数的情况', () => {
       const emptySshConfig = path.join(fixturesDir, 'empty-ssh-config');
+      const originalSshAuthSock = process.env.SSH_AUTH_SOCK;
       fs.writeFileSync(emptySshConfig, '');
 
       try {
+        delete process.env.SSH_AUTH_SOCK;
         process.argv = [
           'node',
           'test',
@@ -250,6 +252,11 @@ describe('集成测试', () => {
           CommandLineParser.parseArgs();
         }, /Missing required parameters/);
       } finally {
+        if (originalSshAuthSock === undefined) {
+          delete process.env.SSH_AUTH_SOCK;
+        } else {
+          process.env.SSH_AUTH_SOCK = originalSshAuthSock;
+        }
         fs.unlinkSync(emptySshConfig);
       }
     });

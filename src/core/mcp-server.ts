@@ -80,6 +80,15 @@ export class SshMcpServer {
     this.sshManager.setConfig(parsedArgs.configs);
     this.registerShutdownHandlers();
 
+    // Register tools before accepting MCP requests.
+    this.registerTools();
+
+    // Create transport instance and connect.
+    const transport = new StdioServerTransport();
+    await this.server.connect(transport);
+
+    Logger.log("MCP server connection established");
+
     // Security warning
     const allConfigs = Object.values(parsedArgs.configs);
     if (
@@ -108,24 +117,17 @@ export class SshMcpServer {
     // Pre-connect to all servers if flag is set
     if (parsedArgs.preConnect) {
       Logger.log("Pre-connecting to all configured SSH servers...", "info");
-      try {
-        await this.sshManager.connectAll();
-        Logger.log("Successfully pre-connected to all SSH servers", "info");
-      } catch (error) {
-        Logger.log(
-          `Warning: Some SSH connections failed during pre-connect: ${(error as Error).message}`,
-          "error"
-        );
-      }
+      void this.sshManager
+        .connectAll()
+        .then(() => {
+          Logger.log("Successfully pre-connected to all SSH servers", "info");
+        })
+        .catch((error) => {
+          Logger.log(
+            `Warning: Some SSH connections failed during pre-connect: ${(error as Error).message}`,
+            "error"
+          );
+        });
     }
-
-    // Register tools
-    this.registerTools();
-
-    // Create transport instance and connect
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-
-    Logger.log("MCP server connection established");
   }
 }

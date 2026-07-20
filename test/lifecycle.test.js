@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +73,24 @@ function createTempConfig() {
   return { tmpDir, configPath };
 }
 
+function createPreConnectConfig(port) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-mcp-lifecycle-'));
+  const configPath = path.join(tmpDir, 'config.json');
+
+  fs.writeFileSync(configPath, JSON.stringify({
+    test: {
+      host: '127.0.0.1',
+      port,
+      username: 'test',
+      password: 'test',
+      connectionTimeoutMs: 10000,
+      commandWhitelist: ['^echo'],
+    },
+  }));
+
+  return { tmpDir, configPath };
+}
+
 function spawnServer(configPath) {
   const child = spawn(process.execPath, [entrypoint, '--config-file', configPath], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -127,6 +146,53 @@ describe('MCP server lifecycle', () => {
         closeInput();
       } catch {}
       child.kill('SIGKILL');
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts initialize requests while pre-connect is still pending', async () => {
+    const handshakeServer = net.createServer();
+    const sockets = new Set();
+    handshakeServer.on('connection', (socket) => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+    });
+
+    await new Promise((resolve, reject) => {
+      handshakeServer.once('error', reject);
+      handshakeServer.listen(0, '127.0.0.1', resolve);
+    });
+
+    const address = handshakeServer.address();
+    assert.ok(address && typeof address !== 'string');
+    const { tmpDir, configPath } = createPreConnectConfig(address.port);
+    const child = spawn(process.execPath, [entrypoint, '--config-file', configPath, '--pre-connect'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    try {
+      child.stdin.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 61,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'lifecycle-test', version: '1.0.0' },
+        },
+      })}\n`);
+
+      const output = await waitForOutput(child.stdout, /"id":61/, 1250);
+      assert.match(output, /"result"/);
+    } finally {
+      child.stdin.end();
+      if (child.exitCode === null) {
+        const exitPromise = waitForExit(child);
+        child.kill('SIGKILL');
+        await exitPromise;
+      }
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => handshakeServer.close(resolve));
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });

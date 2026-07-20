@@ -186,11 +186,16 @@ export class CommandLineParser {
         }
       }
 
-      const portStr = values.port || positionals[1] || sshConfigEntry?.port?.toString();
+      const portStr = values.port || positionals[1] || sshConfigEntry?.port?.toString() || "22";
       const username = values.username || positionals[2] || sshConfigEntry?.user;
       const password = values.password || positionals[3];
       const privateKey = values.privateKey || sshConfigEntry?.identityFile;
       const passphrase = values.passphrase || process.env.SSH_MCP_PASSPHRASE;
+      const resolvedAgent = values.agent !== undefined
+        ? values.agent
+        : !password && !privateKey
+        ? process.env.SSH_AUTH_SOCK
+        : undefined;
       const whitelist = values.whitelist;
       const blacklist = values.blacklist;
       const allowedLocalPaths = values["allowed-local-paths"];
@@ -202,7 +207,7 @@ export class CommandLineParser {
       // 实际连接地址：优先使用 SSH config 的 HostName
       const actualHost = sshConfigEntry?.hostName || host;
 
-      if (!actualHost || !portStr || !username || (!password && !privateKey && !values.agent)) {
+      if (!actualHost || !portStr || !username || (!password && !privateKey && !resolvedAgent)) {
         throw new Error(
           "Missing required parameters, need to provide host, port, username and password, private key or agent"
         );
@@ -221,7 +226,7 @@ export class CommandLineParser {
         password,
         privateKey,
         passphrase,
-        agent: values.agent,
+        agent: resolvedAgent,
         socksProxy: values.socksProxy,
         pty: pty !== undefined ? pty : undefined,
         tryKeyboard: tryKeyboard !== undefined ? tryKeyboard : undefined,

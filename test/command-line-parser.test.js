@@ -184,6 +184,44 @@ Host testhost
       assert.strictEqual(result.configs.default.password, undefined);
     });
 
+    it('显式 password 存在时不应注入环境 SSH agent', () => {
+      const originalSshAuthSock = process.env.SSH_AUTH_SOCK;
+      process.env.SSH_AUTH_SOCK = '/tmp/environment-agent.sock';
+      process.argv = ['node', 'test', '--host', '1.2.3.4', '--username', 'testuser', '--password', 'testpass'];
+
+      try {
+        const result = CommandLineParser.parseArgs();
+
+        assert.strictEqual(result.configs.default.password, 'testpass');
+        assert.strictEqual(result.configs.default.agent, undefined);
+      } finally {
+        if (originalSshAuthSock === undefined) {
+          delete process.env.SSH_AUTH_SOCK;
+        } else {
+          process.env.SSH_AUTH_SOCK = originalSshAuthSock;
+        }
+      }
+    });
+
+    it('显式 privateKey 存在时不应注入环境 SSH agent', () => {
+      const originalSshAuthSock = process.env.SSH_AUTH_SOCK;
+      process.env.SSH_AUTH_SOCK = '/tmp/environment-agent.sock';
+      process.argv = ['node', 'test', '--host', '1.2.3.4', '--username', 'testuser', '--privateKey', '~/.ssh/id_rsa'];
+
+      try {
+        const result = CommandLineParser.parseArgs();
+
+        assert.strictEqual(result.configs.default.privateKey, path.join(os.homedir(), '.ssh', 'id_rsa'));
+        assert.strictEqual(result.configs.default.agent, undefined);
+      } finally {
+        if (originalSshAuthSock === undefined) {
+          delete process.env.SSH_AUTH_SOCK;
+        } else {
+          process.env.SSH_AUTH_SOCK = originalSshAuthSock;
+        }
+      }
+    });
+
     it('缺少必需参数时应抛出错误', () => {
       process.argv = ['node', 'test', '--host', '1.2.3.4'];
       assert.throws(() => {
@@ -193,6 +231,56 @@ Host testhost
   });
 
   describe('SSH Config 集成', () => {
+    it('SSH config 缺少 Port 和 IdentityFile 时应使用默认端口和 SSH agent', () => {
+      const minimalSshConfigPath = path.join(__dirname, 'fixtures', 'minimal-ssh-config');
+      const originalSshAuthSock = process.env.SSH_AUTH_SOCK;
+      fs.writeFileSync(minimalSshConfigPath, `
+Host minimalhost
+    HostName 172.16.0.2
+    User minimaluser
+`);
+      process.env.SSH_AUTH_SOCK = '/tmp/test-ssh-agent.sock';
+      process.argv = ['node', 'test', '--host', 'minimalhost', '--ssh-config-file', minimalSshConfigPath];
+
+      try {
+        const result = CommandLineParser.parseArgs();
+
+        assert.strictEqual(result.configs.default.host, '172.16.0.2');
+        assert.strictEqual(result.configs.default.port, 22);
+        assert.strictEqual(result.configs.default.username, 'minimaluser');
+        assert.strictEqual(result.configs.default.agent, '/tmp/test-ssh-agent.sock');
+      } finally {
+        if (originalSshAuthSock === undefined) {
+          delete process.env.SSH_AUTH_SOCK;
+        } else {
+          process.env.SSH_AUTH_SOCK = originalSshAuthSock;
+        }
+        fs.unlinkSync(minimalSshConfigPath);
+      }
+    });
+
+    it('命令行 port 和 agent 应覆盖 SSH config 默认值', () => {
+      const originalSshAuthSock = process.env.SSH_AUTH_SOCK;
+      process.env.SSH_AUTH_SOCK = '/tmp/environment-agent.sock';
+
+      try {
+        process.argv = [
+          'node', 'test', '--host', 'testhost', '--port', '3333', '--agent', '/tmp/explicit-agent.sock',
+          '--ssh-config-file', testSshConfigPath,
+        ];
+        const result = CommandLineParser.parseArgs();
+
+        assert.strictEqual(result.configs.default.port, 3333);
+        assert.strictEqual(result.configs.default.agent, '/tmp/explicit-agent.sock');
+      } finally {
+        if (originalSshAuthSock === undefined) {
+          delete process.env.SSH_AUTH_SOCK;
+        } else {
+          process.env.SSH_AUTH_SOCK = originalSshAuthSock;
+        }
+      }
+    });
+
     it('应该从 SSH config 读取连接参数', () => {
       process.argv = ['node', 'test', '--host', 'testhost', '--ssh-config-file', testSshConfigPath];
       const result = CommandLineParser.parseArgs();
