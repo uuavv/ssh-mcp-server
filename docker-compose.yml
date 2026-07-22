@@ -1,0 +1,15 @@
+services:
+  ssh-mcp:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    command: ["--http", "--config-file", "/config/servers.json", "--pre-connect"]
+    volumes:
+      - ./deploy/servers.json:/config/servers.json:ro
+      - ./deploy/id_ed25519:/run/secrets/ssh_key:ro
+      - ./logs:/var/log/ssh-mcp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

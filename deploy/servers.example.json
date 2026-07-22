@@ -1,0 +1,15 @@
+{
+  "local-server": {
+    "host": "127.0.0.1",
+    "port": 22,
+    "username": "ai-ops",
+    "privateKey": "/run/secrets/ssh_key",
+    "connectionTimeoutMs": 30000,
+    "shellCommandTimeoutMs": 300000,
+    "commandBlacklist": [
+      "(^|\\s)reboot(\\s|$)",
+      "(^|\\s)shutdown(\\s|$)",
+      "(^|\\s)mkfs(\\.|\\s|$)"
+    ]
+  }
+}
