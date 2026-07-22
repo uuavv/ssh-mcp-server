@@ -9,7 +9,6 @@ import { startRemoteHttpServer } from "./remote-http-server.js";
 
 export type McpTransportMode = "stdio" | "http";
 
-/** MCP server supporting local stdio and authenticated remote Streamable HTTP. */
 export class SshMcpServer {
   private readonly sshManager = SSHConnectionManager.getInstance();
 
@@ -30,10 +29,7 @@ export class SshMcpServer {
       );
     }
     if (allConfigs.some((config) => !config.allowedRemotePaths?.length)) {
-      Logger.log(
-        "SECURITY WARNING: at least one SSH target has unrestricted remote paths.",
-        "info",
-      );
+      Logger.log("SECURITY WARNING: at least one SSH target has unrestricted remote paths.", "info");
     }
   }
 
@@ -53,6 +49,7 @@ export class SshMcpServer {
       Logger.log(`Received ${reason}, shutting down...`, "info");
       this.sshManager.disconnect();
       await server.close().catch(() => undefined);
+      process.exit(0);
     };
     process.once("SIGINT", () => void shutdown("SIGINT"));
     process.once("SIGTERM", () => void shutdown("SIGTERM"));

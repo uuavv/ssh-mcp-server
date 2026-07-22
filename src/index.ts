@@ -8,29 +8,34 @@ const HELP_TEXT = `Usage: ssh-mcp-server [options] [host port username password]
 
 Transport:
   --http                           Run authenticated Streamable HTTP instead of stdio
-                                   Environment: MCP_BEARER_TOKEN (required, 32+ chars),
-                                   MCP_HTTP_HOST=127.0.0.1, MCP_HTTP_PORT=3000,
-                                   MCP_PATH=/mcp, MCP_REQUESTS_PER_MINUTE=120,
-                                   MCP_AUDIT_LOG_PATH=/path/audit.jsonl
+                                   Env: MCP_BEARER_TOKEN, MCP_HTTP_HOST,
+                                   MCP_HTTP_PORT, MCP_PATH, MCP_REQUESTS_PER_MINUTE,
+                                   MCP_AUDIT_LOG_PATH, MCP_MAX_OUTPUT_CHARS
 
-SSH options:
+Options:
   --config-file <path>             Load SSH server configs from a JSON file
-  --ssh-config-file <path>         Read host aliases from SSH config
-  --ssh <config>                   Add SSH config (repeatable)
-  -h, --host <host>                SSH host or alias
-  -p, --port <port>                SSH port
-  -u, --username <name>            SSH username
-  -w, --password <password>        SSH password (prefer key authentication)
-  -k, --privateKey <path>          SSH private key path
+  --ssh-config-file <path>         Read host aliases from SSH config (default: ~/.ssh/config)
+  --ssh <config>                   Add an SSH config as JSON or legacy key=value pairs (repeatable)
+  -h, --host <host>                SSH host or SSH config alias for single-host mode
+  -p, --port <port>                SSH port for single-host mode
+  -u, --username <name>            SSH username for single-host mode
+  -w, --password <password>        SSH password for single-host mode
+  -k, --privateKey <path>          SSH private key path for single-host mode
   -P, --passphrase <passphrase>    SSH private key passphrase
-  -a, --agent <path>               SSH agent socket
-  -W, --whitelist <patterns>       Command whitelist regexes
-  -B, --blacklist <patterns>       Command blacklist regexes
-  --allowed-local-paths <paths>    Extra allowed local paths
-  --allowed-remote-paths <paths>   Allowed remote absolute paths
-  --pre-connect                    Connect to all targets on startup
-  --version, -v                    Print version
-  --help                           Print help`;
+  -a, --agent <path>               SSH agent socket path or pageant on Windows
+  -W, --whitelist <patterns>       Command whitelist regexes, comma-separated
+  -B, --blacklist <patterns>       Command blacklist regexes, comma-separated
+  -s, --socksProxy <url>           SOCKS proxy URL
+  --allowed-local-paths <paths>    Extra allowed local paths, comma-separated
+  --allowed-remote-paths <paths>   Allowed remote POSIX absolute paths, comma-separated
+  --transport-mode <mode>          SSH transport mode: exec or shell (default: exec)
+  --shell-ready-timeout <ms>       Shell readiness probe timeout (default: 10000)
+  --command-template <template>    Wrap commands with <command> or <quotedCommand>
+  --pty                            Allocate pseudo-tty for exec mode commands (default: true)
+  --try-keyboard                   Enable keyboard-interactive authentication
+  --pre-connect                    Pre-connect to all SSH servers on startup
+  --version, -v                    Print package version
+  --help                           Print this help message`;
 
 function hasArg(...names: string[]): boolean {
   return process.argv.slice(2).some((arg) => names.includes(arg));
@@ -47,9 +52,7 @@ async function main(): Promise<void> {
   }
 
   const httpMode = hasArg("--http");
-  if (httpMode) {
-    process.argv = process.argv.filter((arg) => arg !== "--http");
-  }
+  if (httpMode) process.argv = process.argv.filter((arg) => arg !== "--http");
   await new SshMcpServer(httpMode ? "http" : "stdio").run();
 }
 
