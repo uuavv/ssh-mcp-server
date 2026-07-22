@@ -6,20 +6,14 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { Logger } from "../utils/logger.js";
 
-type Session = {
-  transport: StreamableHTTPServerTransport;
-  server: McpServer;
-};
-
+type Session = { transport: StreamableHTTPServerTransport; server: McpServer };
 type RateBucket = { minute: number; count: number };
 
 function positiveInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
   const value = Number.parseInt(raw, 10);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
   return value;
 }
 
@@ -30,7 +24,6 @@ function safeTokenMatch(header: string | undefined, token: string): boolean {
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
-/** Start a sessionful MCP Streamable HTTP endpoint suitable for Notion Custom Agents. */
 export async function startRemoteHttpServer(
   createServer: () => McpServer,
   disconnectSsh: () => void,
@@ -42,14 +35,10 @@ export async function startRemoteHttpServer(
   const requestsPerMinute = positiveInt("MCP_REQUESTS_PER_MINUTE", 120);
   const auditLogPath = process.env.MCP_AUDIT_LOG_PATH;
 
-  if (!mcpPath.startsWith("/") || mcpPath.includes("?")) {
-    throw new Error("MCP_PATH must be an absolute URL path such as /mcp");
-  }
-  if (bearerToken.length < 32) {
-    throw new Error("MCP_BEARER_TOKEN is required in HTTP mode and must contain at least 32 characters");
-  }
+  if (!mcpPath.startsWith("/") || mcpPath.includes("?")) throw new Error("MCP_PATH must be an absolute URL path such as /mcp");
+  if (bearerToken.length < 32) throw new Error("MCP_BEARER_TOKEN is required in HTTP mode and must contain at least 32 characters");
 
-  const app = createMcpExpressApp();
+  const app = createMcpExpressApp({ host });
   const sessions = new Map<string, Session>();
   const rateBuckets = new Map<string, RateBucket>();
 
@@ -65,14 +54,12 @@ export async function startRemoteHttpServer(
     const ip = req.socket?.remoteAddress || "unknown";
     const minute = Math.floor(Date.now() / 60000);
     const bucket = rateBuckets.get(ip);
-    if (!bucket || bucket.minute !== minute) {
-      rateBuckets.set(ip, { minute, count: 1 });
-    } else if (++bucket.count > requestsPerMinute) {
+    if (!bucket || bucket.minute !== minute) rateBuckets.set(ip, { minute, count: 1 });
+    else if (++bucket.count > requestsPerMinute) {
       audit({ event: "rate_limited", ip, method: req.method });
       res.status(429).json({ error: "Too many requests" });
       return;
     }
-
     if (!safeTokenMatch(req.headers.authorization, bearerToken)) {
       audit({ event: "auth_failed", ip, method: req.method });
       res.set("WWW-Authenticate", "Bearer").status(401).json({ error: "Unauthorized" });
@@ -82,9 +69,7 @@ export async function startRemoteHttpServer(
     next();
   };
 
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok", transport: "streamable-http", sessions: sessions.size });
-  });
+  app.get("/health", (_req, res) => res.json({ status: "ok", transport: "streamable-http", sessions: sessions.size }));
 
   app.post(mcpPath, guard, async (req, res) => {
     try {
@@ -94,13 +79,8 @@ export async function startRemoteHttpServer(
         await existing.transport.handleRequest(req, res, req.body);
         return;
       }
-
       if (sessionId || !isInitializeRequest(req.body)) {
-        res.status(400).json({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Invalid or missing MCP session" },
-          id: null,
-        });
+        res.status(400).json({ jsonrpc: "2.0", error: { code: -32000, message: "Invalid or missing MCP session" }, id: null });
         return;
       }
 
@@ -108,7 +88,9 @@ export async function startRemoteHttpServer(
       const server = createServer();
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => sessions.set(id, { transport, server }),
+        onsessioninitialized: (id) => {
+          sessions.set(id, { transport, server });
+        },
       });
       transport.onclose = () => {
         const id = transport.sessionId;
@@ -119,13 +101,7 @@ export async function startRemoteHttpServer(
       await transport.handleRequest(req, res, req.body);
     } catch (error) {
       Logger.log(`HTTP MCP request failed: ${(error as Error).message}`, "error");
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: "2.0",
-          error: { code: -32603, message: "Internal server error" },
-          id: null,
-        });
-      }
+      if (!res.headersSent) res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: "Internal server error" }, id: null });
     }
   });
 
@@ -142,7 +118,7 @@ export async function startRemoteHttpServer(
   app.delete(mcpPath, guard, sessionHandler);
 
   const httpServer = app.listen(port, host, () => {
-    Logger.log(`Remote MCP listening on http://${host}:${port}${mcpPath}`, "info");
+    Logger.log(`Remote MCP listening on {{http://${host}}}:${port}${mcpPath}`, "info");
     Logger.log("Terminate TLS in Caddy/Nginx; never expose this endpoint without HTTPS.", "info");
   });
 
@@ -151,9 +127,7 @@ export async function startRemoteHttpServer(
     if (shuttingDown) return;
     shuttingDown = true;
     Logger.log(`Received ${signal}, shutting down remote MCP...`, "info");
-    for (const session of sessions.values()) {
-      await session.transport.close().catch(() => undefined);
-    }
+    for (const session of sessions.values()) await session.transport.close().catch(() => undefined);
     sessions.clear();
     disconnectSsh();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));

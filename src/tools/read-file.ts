@@ -26,7 +26,7 @@ export function registerReadFileTool(server: McpServer): void {
         const result = await ssh.executeCommand(`python3 -c ${quote(script)} ${quote(path)} ${maxBytes}`, undefined, connectionName);
         return { content: [{ type: "text", text: result }] };
       } catch (error) {
-        const toolError = toToolError(error, "READ_FILE_FAILED");
+        const toolError = toToolError(error, "UNKNOWN_ERROR");
         return { content: [{ type: "text", text: toolError.message }], isError: true };
       }
     },
