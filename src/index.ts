@@ -6,6 +6,12 @@ import { Logger } from "./utils/logger.js";
 
 const HELP_TEXT = `Usage: ssh-mcp-server [options] [host port username password]
 
+Transport:
+  --http                           Run authenticated Streamable HTTP instead of stdio
+                                   Env: MCP_BEARER_TOKEN, MCP_HTTP_HOST,
+                                   MCP_HTTP_PORT, MCP_PATH, MCP_REQUESTS_PER_MINUTE,
+                                   MCP_AUDIT_LOG_PATH, MCP_MAX_OUTPUT_CHARS
+
 Options:
   --config-file <path>             Load SSH server configs from a JSON file
   --ssh-config-file <path>         Read host aliases from SSH config (default: ~/.ssh/config)
@@ -25,32 +31,29 @@ Options:
   --transport-mode <mode>          SSH transport mode: exec or shell (default: exec)
   --shell-ready-timeout <ms>       Shell readiness probe timeout (default: 10000)
   --command-template <template>    Wrap commands with <command> or <quotedCommand>
-  --pty                           Allocate pseudo-tty for exec mode commands (default: true)
-  --try-keyboard                  Enable keyboard-interactive authentication
-  --pre-connect                   Pre-connect to all SSH servers on startup
-  --version, -v                   Print package version
-  --help                          Print this help message`;
+  --pty                            Allocate pseudo-tty for exec mode commands (default: true)
+  --try-keyboard                   Enable keyboard-interactive authentication
+  --pre-connect                    Pre-connect to all SSH servers on startup
+  --version, -v                    Print package version
+  --help                           Print this help message`;
 
 function hasArg(...names: string[]): boolean {
   return process.argv.slice(2).some((arg) => names.includes(arg));
 }
 
-/**
- * Main program entry
- */
 async function main(): Promise<void> {
   if (hasArg("--help")) {
     console.log(HELP_TEXT);
     return;
   }
-
   if (hasArg("--version", "-v")) {
     console.log(SERVER_CONFIG.version);
     return;
   }
 
-  const sshMcpServer = new SshMcpServer();
-  await sshMcpServer.run();
+  const httpMode = hasArg("--http");
+  if (httpMode) process.argv = process.argv.filter((arg) => arg !== "--http");
+  await new SshMcpServer(httpMode ? "http" : "stdio").run();
 }
 
 main().catch((error) => Logger.handleError(error, "【SSH MCP Server Error】", true));

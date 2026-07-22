@@ -5,6 +5,15 @@ package-lock.json
 # 构建输出
 build/
 
+# Deployment secrets and runtime data
+.env
+deploy/servers.json
+deploy/id_ed25519
+deploy/*.pem
+deploy/*.key
+logs/
+*.jsonl
+
 # 操作系统文件
 .DS_Store
 Thumbs.db
