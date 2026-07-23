@@ -1,4 +1,14 @@
 mcp.example.com {
   encode zstd gzip
-  reverse_proxy 127.0.0.1:3000
+
+  # Streamable HTTP can keep responses open; disable proxy buffering and retain
+  # the real client address for application-level rate limiting and auditing.
+  reverse_proxy 127.0.0.1:3000 {
+    flush_interval -1
+    header_up X-Forwarded-For {remote_host}
+    transport http {
+      read_timeout 1h
+      write_timeout 1h
+    }
+  }
 }

@@ -10,7 +10,9 @@ Transport:
   --http                           Run authenticated Streamable HTTP instead of stdio
                                    Env: MCP_BEARER_TOKEN, MCP_HTTP_HOST,
                                    MCP_HTTP_PORT, MCP_PATH, MCP_REQUESTS_PER_MINUTE,
-                                   MCP_AUDIT_LOG_PATH, MCP_MAX_OUTPUT_CHARS
+                                   MCP_AUDIT_LOG_PATH, MCP_MAX_OUTPUT_CHARS,
+                                   MCP_SESSION_TTL_SECONDS, MCP_MAX_SESSIONS,
+                                   MCP_TRUST_PROXY
 
 Options:
   --config-file <path>             Load SSH server configs from a JSON file
