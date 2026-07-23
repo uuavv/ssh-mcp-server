@@ -2,6 +2,8 @@ services:
   ssh-mcp:
     build: .
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     network_mode: host
     env_file: .env
     command: ["--http", "--config-file", "/config/servers.json", "--pre-connect"]
